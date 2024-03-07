@@ -1,11 +1,16 @@
-import requests
+import asyncio
+
+import aiohttp
+from aiohttp import CookieJar
 
 from utils.nnu.cas_cache_utils import get_mod_auth_cas
 from utils.common_utils import get_ehall_url, get_ehallapp_url
 from utils.request_utils import default_header
 
+from services.nnu.score_rank_service import get_score_rank
 
-def get_user_score(school_name: str, token: str, semester: str, amount: int) -> tuple[dict, int]:
+
+async def get_user_score(school_name: str, token: str, semester: str, amount: int, is_need_rank: bool) -> tuple[dict, int]:
     ehallapp_url = get_ehallapp_url(school_name)
     ehall_url = get_ehall_url(school_name)
 
@@ -13,29 +18,26 @@ def get_user_score(school_name: str, token: str, semester: str, amount: int) -> 
     if mod_auth_cas is None:
         return {'status': 'error', 'message': 'Failed to get user score. authToken is probably invalid.'}, 401
 
-    s = requests.Session()
-    s.cookies.set('MOD_AUTH_CAS', mod_auth_cas)
-    s.headers.update(default_header)
-    if 'Referer' in s.headers:
-        del s.headers['Referer']
+    async with aiohttp.ClientSession(cookie_jar=CookieJar(unsafe=True)) as s:
+        s.cookie_jar.update_cookies({'MOD_AUTH_CAS': mod_auth_cas})
+        s.headers.update(default_header)
+        if 'Referer' in s.headers:
+            del s.headers['Referer']
 
-    # get weu first,it will automatically be set-cookie
-    query_weu_url = ehall_url + '/appShow?appId=4768574631264620'
-    response = s.get(query_weu_url, verify=False)
-    if response.status_code != 200:
-        return {'status': 'retry', 'message': 'Failed to get user score.Please try again'}, 402
+        async with s.get(ehall_url + '/appShow?appId=4768574631264620') as response:
+            if response.status != 200:
+                return {'status': 'retry', 'message': 'Failed to get user score.Please try again'}, 402
 
-    s.headers['Accept'] = 'application/json, text/javascript, */*; q=0.01'
+        query_score_url = ehallapp_url + '/jwapp/sys/cjcx/modules/cjcx/xscjcx.do'
+        query_score_data = get_query_score_data(semester, amount)
+        async with s.post(query_score_url, data=query_score_data) as response:
+            if response.status != 200:
+                return {'status': 'retry', 'message': 'Failed to get user score.Please try again'}, 402
+            original_json = await response.json()
 
-    query_score_url = ehallapp_url + '/jwapp/sys/cjcx/modules/cjcx/xscjcx.do'
-    query_score_data = get_query_score_data(semester, amount)
-    response = s.post(query_score_url, data=query_score_data, verify=False)
-    if response.status_code != 200:
-        return {'status': 'retry', 'message': 'Failed to get user score.Please try again'}, 402
-    # get the response json
-    original_json = response.json()
-    # transform the json
-    return transform_data(original_json), 200
+        result_data = await transform_data_and_add_rankings(school_name, token, original_json, is_need_rank)
+
+    return result_data, 200
 
 
 def get_query_score_data(semester: str, amount: int):
@@ -57,7 +59,7 @@ def get_query_score_data(semester: str, amount: int):
         return query_score_data
 
 
-def transform_data(original_json):
+async def transform_data_and_add_rankings(school_name, token, original_json, isneedrank):
     result = {
         "status": "OK",
         "message": "User score retrieved successfully",
@@ -97,5 +99,15 @@ def transform_data(original_json):
         course_data.update(other_scores)
 
         result["data"].append(course_data)
+
+    if isneedrank:
+        ranking_tasks = [get_score_rank(school_name, token, course["courseID"], course["classID"], course["semester"]) for
+                         course in
+                         result["data"]]
+
+        rankings = await asyncio.gather(*ranking_tasks)
+
+        for i, (rank_info, _) in enumerate(rankings):
+            result["data"][i]["courseRank"] = rank_info["data"]
 
     return result

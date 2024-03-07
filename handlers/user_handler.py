@@ -9,17 +9,25 @@ def user_info_handler(school_name: str, token: str) -> tuple[dict, int]:
     return service.get_user_info(school_name, token)
 
 
-def user_score_handler(school_name: str, token: str, requestdata: dict) -> tuple[dict, int]:
+async def user_score_handler(school_name: str, token: str, requestdata: dict) -> tuple[dict, int]:
     if token is None:
         return {'status': 'error', 'message': 'authToken not found'}, 400
     semester = requestdata.get('semester', "2022-2023-2,2023-2024-1")
     amount = requestdata.get('amount', 10)
+    isneedrank = requestdata.get('isNeedRank', False)
+    if isneedrank == "true":
+        isneedrank = True
+    elif isneedrank == "false":
+        isneedrank = False
+    elif not isinstance(isneedrank, bool):
+        return {'status': 'error', 'message': 'isNeedRank must be true or false'}, 400
+
     service = importlib.import_module(f'services.{school_name}.user_score_service')
 
-    return service.get_user_score(school_name, token, semester, amount)
+    return await service.get_user_score(school_name, token, semester, amount, isneedrank)
 
 
-def score_rank_handler(school_name: str, token: str, requestdata: dict) -> tuple[dict, int]:
+async def score_rank_handler(school_name: str, token: str, requestdata: dict) -> tuple[dict, int]:
     if token is None:
         return {'status': 'error', 'message': 'authToken not found'}, 400
     course_id = requestdata.get('courseID', None)
@@ -29,7 +37,7 @@ def score_rank_handler(school_name: str, token: str, requestdata: dict) -> tuple
         return {'status': 'error', 'message': 'necessary args required'}, 400
     service = importlib.import_module(f'services.{school_name}.score_rank_service')
 
-    return service.get_score_rank(school_name, token, course_id, class_id, semester)
+    return await service.get_score_rank(school_name, token, course_id, class_id, semester)
 
 
 def course_table_handler(school_name: str, token: str, requestdata: dict) -> tuple[dict, int]:

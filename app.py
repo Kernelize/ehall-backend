@@ -1,4 +1,5 @@
 import logging
+import asyncio
 
 from waitress import serve
 from flask import Flask, request
@@ -26,14 +27,16 @@ def user_score(school_name):
     if request.method == 'GET':
         return user_score_handler(school_name, auth_token, {})
     score_request_data = request.json
-    return user_score_handler(school_name, auth_token, score_request_data)
+    result, status_code = asyncio.run(user_score_handler(school_name, auth_token, score_request_data))
+    return result, status_code
 
 
 @app.route('/<school_name>/user/score_rank', methods=['POST'])
 def score_rank(school_name):
     auth_token = request.headers.get('Authorization')
     score_rank_request_data = request.json
-    return score_rank_handler(school_name, auth_token, score_rank_request_data)
+    result, status_code = asyncio.run(score_rank_handler(school_name, auth_token, score_rank_request_data))
+    return result, status_code
 
 
 @app.route('/<school_name>/user/course_table', methods=['GET', 'POST'])
